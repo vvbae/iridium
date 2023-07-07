@@ -2,20 +2,24 @@ use nom::{error::context, multi::many1};
 
 use crate::parse::Parse;
 
-use super::instruction::AssemblerInstruction;
+use super::{assem_instruction::AssemblerInstruction, symbols::SymbolTable};
 
 #[derive(Debug, PartialEq)]
 pub struct Program {
-    instructions: Vec<AssemblerInstruction>,
+    pub instructions: Vec<AssemblerInstruction>,
 }
 
 impl Program {
-    pub fn to_bytes(&self) -> Vec<u8> {
+    pub fn to_bytes(&self, symbols: &SymbolTable) -> Vec<u8> {
         let mut program = Vec::new();
         for instruction in &self.instructions {
-            program.append(&mut instruction.to_bytes());
+            program.append(&mut instruction.to_bytes(symbols));
         }
         program
+    }
+
+    pub fn clear(&mut self) {
+        self.instructions.clear();
     }
 }
 
@@ -33,16 +37,15 @@ mod tests {
 
     #[test]
     fn test_parse_program() {
-        let (_, p) = Program::parse("load $0 #100\n").unwrap();
+        let (_, p) = Program::parse("load $0 #100\ntest: inc $0\n").unwrap();
 
-        assert_eq!(1, p.instructions.len());
+        assert_eq!(2, p.instructions.len());
     }
 
     #[test]
     fn test_program_to_bytes() {
         let (_, program) = Program::parse("load $0 #100\n").unwrap();
-        let bytecode = program.to_bytes();
+        let bytecode = program.to_bytes(&SymbolTable::new());
         assert_eq!(bytecode.len(), 4);
-        println!("{:?}", bytecode);
     }
 }
