@@ -8,6 +8,7 @@ pub struct VM {
     pub program: Vec<u8>,     // The bytecode of the program being run
     remainder: u32,           // Contains the remainder of modulo division ops
     equal_flag: bool,         // Contains the result of the last comparison operation
+    heap: Vec<u8>,            // Memory heap
 }
 
 impl VM {
@@ -18,6 +19,7 @@ impl VM {
             program: Vec::new(),
             remainder: 0,
             equal_flag: false,
+            heap: Vec::new(),
         }
     }
 
@@ -36,13 +38,13 @@ impl VM {
 
     fn execute_instruction(&mut self) -> bool {
         if self.pc >= self.program.len() {
-            return false;
+            return true;
         }
         match self.decode_opcode() {
             // halt
             Opcode::HLT => {
                 println!("HLT encountered");
-                return false;
+                return true;
             }
             // LOAD $1 #15
             Opcode::LOAD => {
@@ -111,6 +113,13 @@ impl VM {
                 self.equal_flag = register1 > register2;
                 self.next_8_bits();
             }
+            // GTE $0 $1
+            Opcode::GTE => {
+                let register1 = self.registers[self.next_8_bits() as usize];
+                let register2 = self.registers[self.next_8_bits() as usize];
+                self.equal_flag = register1 >= register2;
+                self.next_8_bits();
+            }
             // LT $0 $1
             Opcode::LT => {
                 let register1 = self.registers[self.next_8_bits() as usize];
@@ -118,38 +127,64 @@ impl VM {
                 self.equal_flag = register1 < register2;
                 self.next_8_bits();
             }
-            // GTQ $0 $1
-            Opcode::GTQ => {
-                let register1 = self.registers[self.next_8_bits() as usize];
-                let register2 = self.registers[self.next_8_bits() as usize];
-                self.equal_flag = register1 >= register2;
-                self.next_8_bits();
-            }
-            // LTQ $0 $1
-            Opcode::LTQ => {
+            // LTE $0 $1
+            Opcode::LTE => {
                 let register1 = self.registers[self.next_8_bits() as usize];
                 let register2 = self.registers[self.next_8_bits() as usize];
                 self.equal_flag = register1 <= register2;
                 self.next_8_bits();
             }
-            // JEQ $0
-            Opcode::JEQ => {
-                let target = self.registers[self.next_8_bits() as usize];
+            // ALOC $0
+            Opcode::ALOC => {
+                let bytes = self.registers[self.next_8_bits() as usize];
+                let new_end = self.heap.len() as i32 + bytes;
+                self.heap.resize(new_end as usize, 0)
+            }
+            // INC $0
+            Opcode::INC => {
+                let position = self.next_8_bits() as usize;
+                self.registers[position] += 1;
+                self.next_8_bits();
+                self.next_8_bits();
+            }
+            // DEC $0
+            Opcode::DEC => {
+                let position = self.next_8_bits() as usize;
+                self.registers[position] -= 1;
+                self.next_8_bits();
+                self.next_8_bits();
+            }
+            // JMPE $0
+            Opcode::JMPE => {
                 if self.equal_flag {
+                    let target = self.registers[self.next_8_bits() as usize];
                     self.pc = target as usize;
+                } else {
+                    // TODO: Fix the bits
                 }
             }
+            Opcode::NOP => {
+                self.next_8_bits();
+                self.next_8_bits();
+                self.next_8_bits();
+            }
+
             _ => {
                 println!("Unrecognized opcode found! Terminating!");
-                return false;
+                return true;
             }
         }
-        true
+        false
     }
 
     /// Adds an arbitrary byte to the VM's program
     pub fn add_byte(&mut self, b: u8) {
         self.program.push(b);
+    }
+
+    /// Adds a vector of bytes to the VM's program
+    pub fn add_bytes(&mut self, mut b: Vec<u8>) {
+        self.program.append(&mut b);
     }
 
     pub fn get_test_vm() -> VM {
@@ -178,30 +213,6 @@ impl VM {
         let result = ((self.program[self.pc] as u16) << 8) | self.program[self.pc + 1] as u16;
         self.pc += 2;
         result
-    }
-}
-
-impl From<u8> for Opcode {
-    fn from(v: u8) -> Self {
-        match v {
-            0 => Opcode::LOAD,
-            1 => Opcode::ADD,
-            2 => Opcode::SUB,
-            3 => Opcode::MUL,
-            4 => Opcode::DIV,
-            5 => Opcode::HLT,
-            6 => Opcode::JMP,
-            7 => Opcode::JMPF,
-            8 => Opcode::JMPB,
-            9 => Opcode::EQ,
-            10 => Opcode::NEQ,
-            11 => Opcode::GT,
-            12 => Opcode::LT,
-            13 => Opcode::GTQ,
-            14 => Opcode::LTQ,
-            15 => Opcode::JEQ,
-            _ => Opcode::IGL,
-        }
     }
 }
 
@@ -272,5 +283,14 @@ mod tests {
         test_vm.program = vec![15, 0, 0, 0, 17, 0, 0, 0, 17, 0, 0, 0];
         test_vm.run_once();
         assert_eq!(test_vm.pc, 7);
+    }
+
+    #[test]
+    fn test_aloc_opcode() {
+        let mut test_vm = VM::get_test_vm();
+        test_vm.registers[0] = 1024;
+        test_vm.program = vec![16, 0, 0, 0];
+        test_vm.run_once();
+        assert_eq!(test_vm.heap.len(), 1024);
     }
 }

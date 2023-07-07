@@ -1,4 +1,8 @@
-use std::io::{self, Write};
+use std::{
+    fs::File,
+    io::{self, Read, Write},
+    path::Path,
+};
 
 use crate::{assembler::program::Program, parse::Parse, vm::VM};
 
@@ -61,14 +65,41 @@ impl REPL {
                     println!("Farewell! Have a great day!");
                     std::process::exit(0);
                 }
+                ".load_file" => {
+                    print!("Please enter the path to the file you wish to load: ");
+                    io::stdout().flush().expect("Unable to flush stdout");
+                    let mut tmp = String::new();
+                    stdin
+                        .read_line(&mut tmp)
+                        .expect("Unable to read line from user");
+                    let tmp = tmp.trim();
+                    let filename = Path::new(&tmp);
+                    let mut f = File::open(Path::new(&filename)).expect("File not found");
+                    let mut contents = String::new();
+                    f.read_to_string(&mut contents)
+                        .expect("There was an error reading from the file");
+                    let program = match Program::parse(&contents) {
+                        // Rusts pattern matching is pretty powerful an can even be nested
+                        Ok((_, program)) => program,
+                        Err(e) => {
+                            println!("Unable to parse input: {:?}", e);
+                            continue;
+                        }
+                    };
+                    // self.vm.program.append(&mut program.to_bytes());
+                }
+                ".clear" => {
+                    self.vm.program.clear();
+                    println!("Program vector is cleared");
+                }
                 _ => {
                     let (_, result) = Program::parse(buffer).unwrap();
-                    let bytecode = result.to_bytes();
-                    for byte in bytecode {
-                        self.vm.add_byte(byte)
-                    }
+                    // let bytecode = result.to_bytes();
+                    // for byte in bytecode {
+                    //     self.vm.add_byte(byte)
+                    // }
 
-                    self.vm.run_once();
+                    // self.vm.run_once();
                 }
             }
         }
