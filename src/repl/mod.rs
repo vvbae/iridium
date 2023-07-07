@@ -1,29 +1,18 @@
-use std::{
-    io::{self, Write},
-    num::ParseIntError,
-    sync::mpsc::{self, Receiver, Sender},
-};
+use std::io::{self, Write};
 
 use crate::{assembler::program::Program, parse::Parse, vm::VM};
 
-pub static REMOTE_BANNER: &'static str = "Start using Iridium ☂️";
-pub static PROMPT: &'static str = ">>> ";
-
+#[derive(Default)]
 pub struct REPL {
     command_buffer: Vec<String>,
     vm: VM,
-    // pub tx_pipe: Option<Box<Sender<String>>>,
-    // pub rx_pipe: Option<Box<Receiver<String>>>,
 }
 
 impl REPL {
     pub fn new() -> REPL {
-        // let (tx, rx) = mpsc::channel::<String>();
         Self {
             command_buffer: Vec::<String>::new(),
             vm: VM::new(),
-            // tx_pipe: Some(Box::new(tx)),
-            // rx_pipe: Some(Box::new(rx)),
         }
     }
 
@@ -84,39 +73,4 @@ impl REPL {
             }
         }
     }
-
-    // pub fn send_message(&mut self, msg: String) {
-    //     match &self.tx_pipe {
-    //         Some(pipe) => match pipe.send(msg) {
-    //             Ok(_) => {}
-    //             Err(_e) => {}
-    //         },
-    //         None => {}
-    //     }
-    // }
-
-    // pub fn send_prompt(&mut self) {
-    //     match &self.tx_pipe {
-    //         Some(pipe) => match pipe.send(PROMPT.to_owned()) {
-    //             Ok(_) => {}
-    //             Err(_e) => {}
-    //         },
-    //         None => {}
-    //     }
-    // }
-
-    // Accepts a hexadecimal string WITHOUT a leading `0x` and returns a Vec of u8
-    // pub fn parse_hex(&mut self, i: &str) -> Result<Vec<u8>, ParseIntError> {
-    //     let split = i.split(" ").collect::<Vec<&str>>();
-    //     let mut results = Vec::<u8>::new();
-    //     for hex_string in split {
-    //         let byte = u8::from_str_radix(&hex_string, 16);
-    //         match byte {
-    //             Ok(result) => results.push(result),
-    //             Err(e) => return Err(e),
-    //         }
-    //     }
-
-    //     Ok(results)
-    // }
 }

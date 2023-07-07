@@ -24,13 +24,25 @@ pub fn parse_opcode(input: &str) -> ParseResult<'_, Token> {
         "Opcode",
         map(
             map(
-                alt((tag_no_case("load"), tag_no_case("add"))),
+                alt((
+                    tag_no_case("load"),
+                    tag_no_case("add"),
+                    tag_no_case("sub"),
+                    tag_no_case("mul"),
+                    tag_no_case("div"),
+                    tag_no_case("hlt"),
+                    tag_no_case("jmp"),
+                    tag_no_case("jmpf"),
+                    tag_no_case("jmpb"),
+                    tag_no_case("eq"),
+                    tag_no_case("neq"),
+                    tag_no_case("gt"),
+                    tag_no_case("lt"),
+                )),
                 |op: &str| op.to_lowercase(),
             ),
-            |op| match op.as_str() {
-                "load" => Token::Op { code: Opcode::LOAD },
-                "add" => Token::Op { code: Opcode::ADD },
-                _ => unimplemented!(),
+            |op| Token::Op {
+                code: Opcode::from(op.as_str()),
             },
         ),
     )(input)?;

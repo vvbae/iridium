@@ -1,6 +1,7 @@
 use crate::instruction::Opcode;
 
 /// Read 32-bit data (instruction), execute, repeat
+#[derive(Default)]
 pub struct VM {
     pub registers: [i32; 32], // 32-bits is an instruction; first 8-bit->Opcode; remaining->Operands
     pc: usize,                // program counter
@@ -46,7 +47,7 @@ impl VM {
             // LOAD $1 #15
             Opcode::LOAD => {
                 let register = self.next_8_bits() as usize;
-                let number = self.next_16_bits() as u16;
+                let number = self.next_16_bits();
                 self.registers[register] = number as i32;
             }
             // ADD $0 $1 $2

@@ -1,4 +1,6 @@
-use nom::{character::complete::multispace1, error::context, sequence::tuple};
+use nom::{
+    branch::alt, character::complete::multispace1, combinator::map, error::context, sequence::tuple,
+};
 
 use crate::parse::{self, Parse};
 
@@ -24,9 +26,8 @@ impl AssemblerInstruction {
         };
 
         for operand in vec![&self.operand1, &self.operand2, &self.operand3] {
-            match operand {
-                Some(t) => AssemblerInstruction::extract_operand(t, &mut results),
-                None => {}
+            if let Some(token) = operand {
+                AssemblerInstruction::extract_operand(token, &mut results)
             }
         }
 
@@ -53,26 +54,51 @@ impl AssemblerInstruction {
 
 impl<'a> Parse<'a> for AssemblerInstruction {
     fn parse(input: &'a str) -> parse::ParseResult<'a, Self> {
-        let (remaining_input, (opcode, _, reg, _, i)) = context(
+        let (remaining_input, instruction) = context(
             "Instruction",
-            tuple((
-                parse_opcode,
-                multispace1,
-                parse_register,
-                multispace1,
-                parse_int_operand,
+            alt((
+                map(
+                    tuple((
+                        parse_opcode,
+                        multispace1,
+                        parse_register,
+                        multispace1,
+                        parse_register,
+                        multispace1,
+                        parse_register,
+                    )),
+                    |(opcode, _, reg1, _, reg2, _, reg3)| AssemblerInstruction {
+                        opcode,
+                        operand1: Some(reg1),
+                        operand2: Some(reg2),
+                        operand3: Some(reg3),
+                    },
+                ),
+                map(
+                    tuple((
+                        parse_opcode,
+                        multispace1,
+                        parse_register,
+                        multispace1,
+                        parse_int_operand,
+                    )),
+                    |(opcode, _, reg, _, i)| AssemblerInstruction {
+                        opcode,
+                        operand1: Some(reg),
+                        operand2: Some(i),
+                        operand3: None,
+                    },
+                ),
+                map(parse_opcode, |opcode| AssemblerInstruction {
+                    opcode,
+                    operand1: None,
+                    operand2: None,
+                    operand3: None,
+                }),
             )),
         )(input)?;
 
-        Ok((
-            remaining_input,
-            AssemblerInstruction {
-                opcode,
-                operand1: Some(reg),
-                operand2: Some(i),
-                operand3: None,
-            },
-        ))
+        Ok((remaining_input, instruction))
     }
 }
 
@@ -90,6 +116,32 @@ mod tests {
             operand1: Some(Token::Register { reg_num: 0 }),
             operand2: Some(Token::IntegerOperand { value: 100 }),
             operand3: None,
+        };
+
+        assert_eq!(expected, value);
+    }
+
+    #[test]
+    fn test_parse_instruction_form_two() {
+        let (_, value) = AssemblerInstruction::parse("hlt\n").unwrap();
+        let expected = AssemblerInstruction {
+            opcode: Token::Op { code: Opcode::HLT },
+            operand1: None,
+            operand2: None,
+            operand3: None,
+        };
+
+        assert_eq!(expected, value);
+    }
+
+    #[test]
+    fn test_parse_instruction_form_three() {
+        let (_, value) = AssemblerInstruction::parse("add $0 $1 $2\n").unwrap();
+        let expected = AssemblerInstruction {
+            opcode: Token::Op { code: Opcode::ADD },
+            operand1: Some(Token::Register { reg_num: 0 }),
+            operand2: Some(Token::Register { reg_num: 1 }),
+            operand3: Some(Token::Register { reg_num: 2 }),
         };
 
         assert_eq!(expected, value);
