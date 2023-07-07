@@ -4,7 +4,7 @@ use std::{
     sync::mpsc::{self, Receiver, Sender},
 };
 
-use crate::vm::VM;
+use crate::{assembler::program::Program, parse::Parse, vm::VM};
 
 pub static REMOTE_BANNER: &'static str = "Start using Iridium ☂️";
 pub static PROMPT: &'static str = ">>> ";
@@ -73,17 +73,12 @@ impl REPL {
                     std::process::exit(0);
                 }
                 _ => {
-                    let results = self.parse_hex(buffer);
-                    match results {
-                        Ok(bytes) => {
-                            for byte in bytes {
-                                self.vm.add_byte(byte)
-                            }
-                        }
-                        Err(_e) => {
-                            println!("Unable to decode hex string. Please enter 4 groups of 2 hex characters.")
-                        }
-                    };
+                    let (_, result) = Program::parse(buffer).unwrap();
+                    let bytecode = result.to_bytes();
+                    for byte in bytecode {
+                        self.vm.add_byte(byte)
+                    }
+
                     self.vm.run_once();
                 }
             }
@@ -110,19 +105,18 @@ impl REPL {
     //     }
     // }
 
-    /// Accepts a hexadecimal string WITHOUT a leading `0x` and returns a Vec of u8
-    /// Example for a LOAD command: (LOAD)00 (12)0C (1000)03 E8
-    pub fn parse_hex(&mut self, i: &str) -> Result<Vec<u8>, ParseIntError> {
-        let split = i.split(" ").collect::<Vec<&str>>();
-        let mut results = Vec::<u8>::new();
-        for hex_string in split {
-            let byte = u8::from_str_radix(&hex_string, 16);
-            match byte {
-                Ok(result) => results.push(result),
-                Err(e) => return Err(e),
-            }
-        }
+    // Accepts a hexadecimal string WITHOUT a leading `0x` and returns a Vec of u8
+    // pub fn parse_hex(&mut self, i: &str) -> Result<Vec<u8>, ParseIntError> {
+    //     let split = i.split(" ").collect::<Vec<&str>>();
+    //     let mut results = Vec::<u8>::new();
+    //     for hex_string in split {
+    //         let byte = u8::from_str_radix(&hex_string, 16);
+    //         match byte {
+    //             Ok(result) => results.push(result),
+    //             Err(e) => return Err(e),
+    //         }
+    //     }
 
-        Ok(results)
-    }
+    //     Ok(results)
+    // }
 }

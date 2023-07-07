@@ -1,4 +1,4 @@
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone, Copy)]
 /// An 8-bit integer (0 ~ 255)
 pub enum Opcode {
     LOAD,

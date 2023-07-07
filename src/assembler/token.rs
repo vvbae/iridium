@@ -23,15 +23,17 @@ pub fn parse_opcode(input: &str) -> ParseResult<'_, Token> {
     let (remaining, token) = context(
         "Opcode",
         map(
-            alt((tag_no_case("load"), tag_no_case("add"))),
-            |op| match op {
+            map(
+                alt((tag_no_case("load"), tag_no_case("add"))),
+                |op: &str| op.to_lowercase(),
+            ),
+            |op| match op.as_str() {
                 "load" => Token::Op { code: Opcode::LOAD },
                 "add" => Token::Op { code: Opcode::ADD },
                 _ => unimplemented!(),
             },
         ),
     )(input)?;
-
     Ok((remaining, token))
 }
 
@@ -40,7 +42,6 @@ pub fn parse_register(input: &str) -> ParseResult<'_, Token> {
         "Register",
         preceded(tag("$"), take_while(|c: char| c.is_numeric())),
     )(input)?;
-
     Ok((
         remaining,
         Token::Register {
@@ -54,7 +55,6 @@ pub fn parse_int_operand(input: &str) -> ParseResult<'_, Token> {
         "Integer Operand",
         preceded(tag("#"), take_while(|c: char| c.is_numeric())),
     )(input)?;
-
     Ok((
         remaining,
         Token::IntegerOperand {

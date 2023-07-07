@@ -1,6 +1,4 @@
-use nom::{
-    bytes::complete::tag_no_case, character::complete::multispace1, error::context, sequence::tuple,
-};
+use nom::{character::complete::multispace1, error::context, sequence::tuple};
 
 use crate::parse::{self, Parse};
 
@@ -14,9 +12,48 @@ pub struct AssemblerInstruction {
     operand3: Option<Token>,
 }
 
+impl AssemblerInstruction {
+    pub fn to_bytes(&self) -> Vec<u8> {
+        let mut results = Vec::new();
+        match &self.opcode {
+            Token::Op { code } => results.push(*code as u8),
+            _ => {
+                println!("Non-opcode found in opcode field");
+                std::process::exit(1);
+            }
+        };
+
+        for operand in vec![&self.operand1, &self.operand2, &self.operand3] {
+            match operand {
+                Some(t) => AssemblerInstruction::extract_operand(t, &mut results),
+                None => {}
+            }
+        }
+
+        results
+    }
+
+    fn extract_operand(t: &Token, results: &mut Vec<u8>) {
+        match t {
+            Token::Register { reg_num } => results.push(*reg_num),
+            Token::IntegerOperand { value } => {
+                let converted = *value as u16;
+                let byte1 = converted;
+                let byte2 = converted >> 8;
+                results.push(byte2 as u8);
+                results.push(byte1 as u8);
+            }
+            _ => {
+                println!("Opcode found in operand field");
+                std::process::exit(1);
+            }
+        }
+    }
+}
+
 impl<'a> Parse<'a> for AssemblerInstruction {
     fn parse(input: &'a str) -> parse::ParseResult<'a, Self> {
-        let (remaining_input, (opcode, _, reg, _, i, _)) = context(
+        let (remaining_input, (opcode, _, reg, _, i)) = context(
             "Instruction",
             tuple((
                 parse_opcode,
@@ -24,7 +61,6 @@ impl<'a> Parse<'a> for AssemblerInstruction {
                 parse_register,
                 multispace1,
                 parse_int_operand,
-                tag_no_case("\n"),
             )),
         )(input)?;
 
