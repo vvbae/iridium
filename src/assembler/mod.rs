@@ -5,6 +5,9 @@ use self::{
     symbols::{Symbol, SymbolTable, SymbolType},
 };
 
+pub const PIE_HEADER_PREFIX: [u8; 4] = [45, 50, 49, 45];
+pub const PIE_HEADER_LENGTH: usize = 64;
+
 #[derive(Debug, PartialEq, Clone)]
 pub enum AssemblerPhase {
     First,
@@ -36,8 +39,13 @@ impl Assembler {
     pub fn assemble(&mut self, raw: &str) -> Option<Vec<u8>> {
         match Program::parse(raw) {
             Ok((_, program)) => {
+                let mut assembled_program = self.write_pie_header();
                 self.process_first_phase(&program);
-                Some(self.process_second_phase(&program))
+                let mut body = self.process_second_phase(&program);
+                println!("Body length: {:?}", body.len());
+
+                assembled_program.append(&mut body);
+                Some(assembled_program)
             }
             Err(e) => {
                 println!("There was an error assembling the code: {:?}", e);
@@ -79,6 +87,18 @@ impl Assembler {
             c += 4 // an instruction is 32-bit = 4 bytes
         }
     }
+
+    /// Write header: 4 bytes and 60 0s
+    fn write_pie_header(&self) -> Vec<u8> {
+        let mut header = vec![];
+        for byte in PIE_HEADER_PREFIX.into_iter() {
+            header.push(byte.clone());
+        }
+        while header.len() < PIE_HEADER_LENGTH {
+            header.push(0 as u8);
+        }
+        header
+    }
 }
 
 #[cfg(test)]
@@ -94,9 +114,9 @@ mod tests {
             "load $0 #100\nload $1 #1\nload $2 #0\ntest: inc $0\nneq $0 $2\njmpe @test\nhlt";
         let program = asm.assemble(test_string).unwrap();
         let mut vm = VM::new();
-        // assert_eq!(program.len(), 21);
+        assert_eq!(program.len(), 92);
         vm.add_bytes(program);
-        // assert_eq!(vm.program.len(), 21);
+        assert_eq!(vm.program.len(), 92);
     }
 }
 

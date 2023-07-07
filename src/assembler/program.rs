@@ -37,7 +37,7 @@ mod tests {
 
     #[test]
     fn test_parse_program() {
-        let (_, p) = Program::parse("load $0 #100\ntest: inc $0\n").unwrap();
+        let (_, p) = Program::parse("jmpe @test\nhlt").unwrap();
 
         assert_eq!(2, p.instructions.len());
     }

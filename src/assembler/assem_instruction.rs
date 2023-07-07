@@ -1,5 +1,3 @@
-use std::error;
-
 use nom::{
     branch::alt,
     bytes::complete::tag,
@@ -14,8 +12,8 @@ use crate::parse::{self, Parse};
 use super::{
     symbols::SymbolTable,
     token::{
-        parse_directive, parse_int_operand, parse_label_declaration, parse_opcode, parse_register,
-        Token,
+        parse_directive, parse_int_operand, parse_label_declaration, parse_label_usage,
+        parse_opcode, parse_register, Token,
     },
 };
 
@@ -103,7 +101,19 @@ impl<'a> Parse<'a> for AssemblerInstruction {
         let (remaining_input, instruction) = context(
             "Instruction",
             alt((
-                // <opcode> | <opcode> <tok1> | <opcode> <tok1> <tok2> | <opcode> <tok1> <tok2> <tok3> | <label> <opcode> <tok1> <tok2> <tok3>
+                // <opcode> <label_usage>
+                map(
+                    tuple((parse_opcode, multispace1, parse_label_usage, opt(tag("\n")))),
+                    |(opcode, _, label, _)| AssemblerInstruction {
+                        opcode: Some(opcode),
+                        label: Some(label),
+                        directive: None,
+                        operand1: None,
+                        operand2: None,
+                        operand3: None,
+                    },
+                ),
+                // [label_decl] <opcode> [tok1] [tok2] [tok3]
                 map(
                     tuple((
                         opt(parse_label_declaration),
@@ -132,7 +142,7 @@ impl<'a> Parse<'a> for AssemblerInstruction {
                         operand3: tok3,
                     },
                 ),
-                // <directive> | <directive> <tok1> | <directive> <tok1> <tok2> | <directive> <tok1> <tok2> <tok3>
+                // <directive> [tok1] [tok2] [tok3]
                 map(
                     tuple((
                         parse_directive,
@@ -229,6 +239,23 @@ mod tests {
             directive: Some(Token::Directive {
                 name: "asciiz".to_string(),
             }),
+            operand1: None,
+            operand2: None,
+            operand3: None,
+        };
+
+        assert_eq!(expected, value);
+    }
+
+    #[test]
+    fn test_parse_instruction_form_five() {
+        let (_, value) = AssemblerInstruction::parse("jmpe @test\n").unwrap();
+        let expected = AssemblerInstruction {
+            opcode: Some(Token::Op { code: Opcode::JMPE }),
+            label: Some(Token::LabelUsage {
+                name: "test".to_string(),
+            }),
+            directive: None,
             operand1: None,
             operand2: None,
             operand3: None,
