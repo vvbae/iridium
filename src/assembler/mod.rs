@@ -23,7 +23,7 @@ impl Default for AssemblerPhase {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct Assembler {
     pub phase: AssemblerPhase,       // Tracks which phase the assember is in
     pub symbols: SymbolTable,        // Symbol table for constants and variables

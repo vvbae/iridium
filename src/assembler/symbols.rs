@@ -20,7 +20,7 @@ impl Symbol {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct SymbolTable {
     symbols: Vec<Symbol>,
 }

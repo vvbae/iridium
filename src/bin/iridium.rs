@@ -32,13 +32,19 @@ fn main() -> Result<(), Vec<AssemblerError>> {
     match matches.args_present() {
         true => {
             let filename = matches.get_one::<String>("INPUT_FILE").unwrap();
-            let program = read_file(filename).unwrap();
-            let mut asm = assembler::Assembler::new();
-            let mut vm = VM::new();
-            let program = asm.assemble(&program)?;
-            vm.add_bytes(program);
-            vm.run();
-            std::process::exit(0);
+            match read_file(filename) {
+                Ok(program) => {
+                    let mut asm = assembler::Assembler::new();
+                    let mut vm = VM::new();
+                    let program = asm.assemble(&program)?;
+                    vm.add_bytes(program);
+                    vm.run();
+                    std::process::exit(0);
+                }
+                Err(e) => {
+                    eprintln!("There was an error opening that file: {:?}", e);
+                }
+            }
         }
         false => start_repl(),
     }

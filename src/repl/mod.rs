@@ -4,12 +4,19 @@ use std::{
     path::Path,
 };
 
-use crate::{assembler::program::Program, parse::Parse, vm::VM};
+use crate::{
+    assembler::{program::Program, Assembler},
+    parse::Parse,
+    scheduler::Scheduler,
+    vm::VM,
+};
 
 #[derive(Default)]
 pub struct REPL {
     command_buffer: Vec<String>,
     vm: VM,
+    asm: Assembler,
+    scheduler: Scheduler,
 }
 
 impl REPL {
@@ -17,6 +24,8 @@ impl REPL {
         Self {
             command_buffer: Vec::<String>::new(),
             vm: VM::new(),
+            asm: Assembler::new(),
+            scheduler: Scheduler::new(),
         }
     }
 
@@ -88,6 +97,27 @@ impl REPL {
                     };
                     // self.vm.program.append(&mut program.to_bytes());
                 }
+                ".spawn" => {
+                    let contents = self.get_data_from_load();
+                    if let Some(contents) = contents {
+                        match self.asm.assemble(&contents) {
+                            Ok(mut assembled_program) => {
+                                println!("Sending assembled program to VM");
+                                self.vm.program.append(&mut assembled_program);
+                                println!("{:#?}", self.vm.program);
+                                self.scheduler.get_thread(self.vm.clone());
+                            }
+                            Err(errors) => {
+                                for error in errors {
+                                    println!("Unable to parse input: {}", error);
+                                }
+                                continue;
+                            }
+                        }
+                    } else {
+                        continue;
+                    }
+                }
                 ".clear" => {
                     self.vm.program.clear();
                     println!("Program vector is cleared");
@@ -101,6 +131,36 @@ impl REPL {
 
                     // self.vm.run_once();
                 }
+            }
+        }
+    }
+
+    fn get_data_from_load(&mut self) -> Option<String> {
+        let stdin = io::stdin();
+        print!("Please enter the path to the file you wish to load: ");
+        io::stdout().flush().expect("Unable to flush stdout");
+        let mut tmp = String::new();
+
+        stdin
+            .read_line(&mut tmp)
+            .expect("Unable to read line from user");
+        println!("Attempting to load program from file...");
+
+        let tmp = tmp.trim();
+        let filename = Path::new(&tmp);
+        let mut f = match File::open(&filename) {
+            Ok(f) => f,
+            Err(e) => {
+                println!("There was an error opening that file: {:?}", e);
+                return None;
+            }
+        };
+        let mut contents = String::new();
+        match f.read_to_string(&mut contents) {
+            Ok(_bytes_read) => Some(contents),
+            Err(e) => {
+                println!("there was an error reading that file: {:?}", e);
+                None
             }
         }
     }
