@@ -1,10 +1,10 @@
 use nom::{
     branch::alt,
-    bytes::complete::{tag, tag_no_case},
+    bytes::complete::{tag, tag_no_case, take_until},
     character::complete::{alpha1, alphanumeric1, digit1},
     combinator::map,
     error::context,
-    sequence::{preceded, terminated},
+    sequence::{preceded, terminated, tuple},
 };
 
 use crate::{instruction::Opcode, parse::ParseResult};
@@ -14,9 +14,24 @@ pub enum Token {
     Op { code: Opcode },
     Register { reg_num: u8 },
     IntegerOperand { value: i32 },
+    StringOperand { value: String },
     LabelDeclaration { name: String },
     LabelUsage { name: String },
     Directive { name: String },
+}
+
+pub fn parse_str_operand(input: &str) -> ParseResult<'_, Token> {
+    let (remaining, (_, token, _)) = context(
+        "String Operand",
+        tuple((tag("'"), take_until("'"), tag("'"))),
+    )(input)?;
+
+    Ok((
+        remaining,
+        Token::StringOperand {
+            value: token.to_string(),
+        },
+    ))
 }
 
 pub fn parse_label_declaration(input: &str) -> ParseResult<'_, Token> {
@@ -168,6 +183,17 @@ mod tests {
         };
 
         let (_, value) = parse_directive(".asciiz\n").unwrap();
+
+        assert_eq!(value, expected);
+    }
+
+    #[test]
+    fn test_parse_str_operand() {
+        let expected = Token::StringOperand {
+            value: "hello".to_string(),
+        };
+
+        let (_, value) = parse_str_operand("'hello'").unwrap();
 
         assert_eq!(value, expected);
     }

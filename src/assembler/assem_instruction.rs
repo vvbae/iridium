@@ -13,7 +13,7 @@ use super::{
     symbols::SymbolTable,
     token::{
         parse_directive, parse_int_operand, parse_label_declaration, parse_label_usage,
-        parse_opcode, parse_register, Token,
+        parse_opcode, parse_register, parse_str_operand, Token,
     },
 };
 
@@ -28,7 +28,7 @@ pub struct AssemblerInstruction {
 }
 
 impl AssemblerInstruction {
-    /// Turn entire instruction to bytes
+    /// Convert entire instruction to bytes
     pub fn to_bytes(&self, symbol_table: &SymbolTable) -> Vec<u8> {
         let mut results = Vec::new();
         match &self.opcode {
@@ -52,7 +52,7 @@ impl AssemblerInstruction {
         results
     }
 
-    /// Turn a register to u8 or operand to u16
+    /// Convert a register, operand, label to u8
     fn extract_operand(t: &Token, results: &mut Vec<u8>, symbol_table: &SymbolTable) {
         match t {
             Token::Register { reg_num } => results.push(*reg_num),
@@ -81,18 +81,51 @@ impl AssemblerInstruction {
         }
     }
 
+    /// If this instruction contains any operands
+    pub fn contain_operands(&self) -> bool {
+        self.operand1.is_some() || self.operand2.is_some() || self.operand3.is_some()
+    }
+
+    /// If this instruction contains a label
     pub fn is_label(&self) -> bool {
         self.label.is_some()
     }
 
-    pub fn label_name(&self) -> Option<String> {
-        match &self.label {
-            Some(l) => match l {
-                Token::LabelDeclaration { name } => Some(name.clone()),
-                _ => None,
-            },
-            None => None,
-        }
+    /// If this instruction contains a directive
+    pub fn is_directive(&self) -> bool {
+        self.directive.is_some()
+    }
+
+    /// If this instruction contains an opcode
+    pub fn is_opcode(&self) -> bool {
+        self.opcode.is_some()
+    }
+
+    /// If contained label, return label; Else None
+    pub fn get_label_name(&self) -> Option<String> {
+        assert_eq!(self.label.is_some(), true);
+        self.label.as_ref().map_or(None, |tok| match tok {
+            Token::LabelDeclaration { name } => Some(name.to_owned()),
+            _ => None,
+        })
+    }
+
+    /// If contained directive, return name; Else None
+    pub fn get_directive_name(&self) -> Option<String> {
+        assert_eq!(self.directive.is_some(), true);
+        self.directive.as_ref().map_or(None, |tok| match tok {
+            Token::Directive { name } => Some(name.to_owned()),
+            _ => None,
+        })
+    }
+
+    /// If contained string constant, return string; Else None
+    pub fn get_string_constant(&self) -> Option<String> {
+        assert_eq!(self.operand1.is_some(), true);
+        self.operand1.as_ref().map_or(None, |tok| match tok {
+            Token::StringOperand { value } => Some(value.to_owned()),
+            _ => None,
+        })
     }
 }
 
@@ -109,6 +142,23 @@ impl<'a> Parse<'a> for AssemblerInstruction {
                         label: Some(label),
                         directive: None,
                         operand1: None,
+                        operand2: None,
+                        operand3: None,
+                    },
+                ),
+                // <label_decl> <directive> <tok1>
+                map(
+                    tuple((
+                        parse_label_declaration,
+                        preceded(multispace1, parse_directive),
+                        preceded(multispace1, parse_str_operand),
+                        opt(tag("\n")),
+                    )),
+                    |(label, directive, tok, _)| AssemblerInstruction {
+                        opcode: None,
+                        label: Some(label),
+                        directive: Some(directive),
+                        operand1: Some(tok),
                         operand2: None,
                         operand3: None,
                     },
@@ -257,6 +307,27 @@ mod tests {
             }),
             directive: None,
             operand1: None,
+            operand2: None,
+            operand3: None,
+        };
+
+        assert_eq!(expected, value);
+    }
+
+    #[test]
+    fn test_string_directive() {
+        let (_, value) = AssemblerInstruction::parse("test: .asciiz 'Hello'\n").unwrap();
+        let expected = AssemblerInstruction {
+            opcode: None,
+            label: Some(Token::LabelDeclaration {
+                name: "test".to_string(),
+            }),
+            directive: Some(Token::Directive {
+                name: "asciiz".to_string(),
+            }),
+            operand1: Some(Token::StringOperand {
+                value: "Hello".to_string(),
+            }),
             operand2: None,
             operand3: None,
         };

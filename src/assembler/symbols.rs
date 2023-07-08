@@ -6,15 +6,15 @@ pub enum SymbolType {
 #[derive(Debug)]
 pub struct Symbol {
     name: String,
-    offset: u32,
+    offset: Option<u32>,
     symbol_type: SymbolType,
 }
 
 impl Symbol {
-    pub fn new(name: String, symbol_type: SymbolType, offset: u32) -> Self {
+    pub fn new(name: String, symbol_type: SymbolType) -> Self {
         Self {
             name,
-            offset,
+            offset: None,
             symbol_type,
         }
     }
@@ -32,15 +32,33 @@ impl SymbolTable {
         }
     }
 
+    /// Add symbol to table
     pub fn add_symbol(&mut self, s: Symbol) {
         self.symbols.push(s)
     }
 
+    /// If contain symbol
+    pub fn contain_symbol(&self, name: &str) -> bool {
+        self.symbols.iter().find(|s| s.name == name).is_some()
+    }
+
+    /// Get symbol offset by name
     pub fn symbol_value(&self, name: &str) -> Option<u32> {
         self.symbols
             .iter()
             .find(|s| s.name == name)
-            .map_or(None, |s| Some(s.offset))
+            .map_or(None, |s| s.offset)
+    }
+
+    /// Set symbol offset
+    pub fn set_symbol_offset(&mut self, name: &str, offset: u32) -> bool {
+        self.symbols
+            .iter_mut()
+            .find(|s| s.name == name)
+            .map_or(false, |s| {
+                s.offset = Some(offset);
+                true
+            })
     }
 }
 
@@ -51,7 +69,7 @@ mod tests {
     #[test]
     fn test_symbol_table() {
         let mut sym = SymbolTable::new();
-        let new_symbol = Symbol::new("test".to_string(), SymbolType::Label, 12);
+        let new_symbol = Symbol::new("test".to_string(), SymbolType::Label);
         sym.add_symbol(new_symbol);
         assert_eq!(sym.symbols.len(), 1);
         let v = sym.symbol_value("test");

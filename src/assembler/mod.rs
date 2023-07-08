@@ -1,6 +1,9 @@
-use crate::parse::Parse;
+use std::vec;
+
+use crate::{error::AssemblerError, parse::Parse};
 
 use self::{
+    assem_instruction::AssemblerInstruction,
     program::Program,
     symbols::{Symbol, SymbolTable, SymbolType},
 };
@@ -22,8 +25,15 @@ impl Default for AssemblerPhase {
 
 #[derive(Debug)]
 pub struct Assembler {
-    pub phase: AssemblerPhase,
-    pub symbols: SymbolTable,
+    pub phase: AssemblerPhase,       // Tracks which phase the assember is in
+    pub symbols: SymbolTable,        // Symbol table for constants and variables
+    pub ro: Vec<u8>,                 // read-only data section constants are put in
+    pub bytecode: Vec<u8>,           // compiled bytecode generated from the assembly instructions
+    ro_offset: u32,                  // current offset of the read-only section
+    sections: Vec<AssemblerSection>, // list of all the sections in the code
+    curr_section: Option<AssemblerSection>, // current section the assembler is in
+    curr_instruction: u32,           // current instruction the assembler is converting to bytecode
+    errors: Vec<AssemblerError>,     // all errors
 }
 
 impl Assembler {
@@ -31,60 +41,150 @@ impl Assembler {
         Self {
             phase: AssemblerPhase::First,
             symbols: SymbolTable::new(),
+            ro: Vec::new(),
+            bytecode: Vec::new(),
+            ro_offset: 0,
+            sections: Vec::new(),
+            curr_section: None,
+            curr_instruction: 0,
+            errors: Vec::new(),
         }
     }
 
-    /// Process first and second phase of teh program
-    /// Return program instructions as bytes from the second phase
-    pub fn assemble(&mut self, raw: &str) -> Option<Vec<u8>> {
+    /// Convert a raw string to bytecode
+    pub fn assemble(&mut self, raw: &str) -> Result<Vec<u8>, Vec<AssemblerError>> {
         match Program::parse(raw) {
-            Ok((_, program)) => {
+            Ok((remainder, program)) => {
+                assert_eq!(remainder, "");
                 let mut assembled_program = self.write_pie_header();
                 self.process_first_phase(&program);
+
+                if !self.errors.is_empty() {
+                    return Err(self.errors.clone());
+                }
+
+                if self.sections.len() != 2 {
+                    self.errors.push(AssemblerError::InsufficientSections);
+                    return Err(self.errors.clone());
+                }
+
                 let mut body = self.process_second_phase(&program);
-                println!("Body length: {:?}", body.len());
 
                 assembled_program.append(&mut body);
-                Some(assembled_program)
+                Ok(assembled_program)
             }
             Err(e) => {
-                println!("There was an error assembling the code: {:?}", e);
-                None
+                eprintln!("There was an error parsing the code: {:?}", e);
+                Err(vec![AssemblerError::ParsingError])
             }
         }
     }
 
     /// Extract program labels
     fn process_first_phase(&mut self, p: &Program) {
-        self.extract_labels(p);
+        for i in &p.instructions {
+            if i.is_label() {
+                if self.curr_section.is_some() {
+                    self.process_label_declaration(&i);
+                } else {
+                    self.errors.push(AssemblerError::NoSegmentDeclarationFound(
+                        self.curr_instruction,
+                    ));
+                }
+            }
+
+            if i.is_directive() {
+                self.process_directive(i);
+            }
+            self.curr_instruction += 1;
+        }
         self.phase = AssemblerPhase::Second;
     }
 
     /// Extract program instruction bytes
-    fn process_second_phase(&self, p: &Program) -> Vec<u8> {
+    fn process_second_phase(&mut self, p: &Program) -> Vec<u8> {
+        self.curr_instruction = 0;
         let mut program = Vec::new();
         for i in &p.instructions {
-            let mut bytes = i.to_bytes(&self.symbols);
-            program.append(&mut bytes);
+            if i.is_opcode() {
+                let mut bytes = i.to_bytes(&self.symbols);
+                program.append(&mut bytes);
+            }
+            if i.is_directive() {
+                self.process_directive(i);
+            }
+            self.curr_instruction += 1
         }
         program
     }
 
-    /// Go through every instruction and look for label declarations
-    /// Once found, add it to symbol table
-    fn extract_labels(&mut self, p: &Program) {
-        let mut c = 0;
-        for i in &p.instructions {
-            if i.is_label() {
-                match i.label_name() {
-                    Some(name) => {
-                        let symbol = Symbol::new(name, SymbolType::Label, c);
-                        self.symbols.add_symbol(symbol);
-                    }
-                    None => {}
+    /// Handles directives
+    fn process_directive(&mut self, i: &AssemblerInstruction) {
+        let directive_name = i.get_directive_name().unwrap();
+        if i.contain_operands() {
+            match directive_name.as_ref() {
+                "asciiz" => {
+                    self.handle_asciiz(i);
+                }
+                "integer" => {
+                    // TODO: self.handle_integer(i);
+                    todo!()
+                }
+                _ => {
+                    self.errors.push(AssemblerError::UnknownDirectiveFound(
+                        directive_name.clone(),
+                    ));
                 }
             }
-            c += 4 // an instruction is 32-bit = 4 bytes
+        } else {
+            self.process_section_header(&directive_name);
+        }
+    }
+
+    /// Handles the declaration of a label such as:
+    /// hello: .asciiz 'Hello'
+    fn process_label_declaration(&mut self, i: &AssemblerInstruction) {
+        let label_name = i.get_label_name().unwrap();
+        if self.symbols.contain_symbol(&label_name) {
+            self.errors.push(AssemblerError::SymbolAlreadyDeclared);
+            return;
+        }
+
+        let symbol = Symbol::new(label_name, SymbolType::Label);
+        self.symbols.add_symbol(symbol);
+    }
+
+    /// Handles a declaration of a section header, such as:
+    /// .code
+    fn process_section_header(&mut self, header_name: &str) {
+        if let section = AssemblerSection::from(header_name) {
+            if section == AssemblerSection::Unknown {
+                return;
+            }
+            self.sections.push(section.clone());
+            self.curr_section = Some(section);
+        }
+    }
+
+    /// Handles a declaration of a null-terminated string:
+    /// hello: .asciiz 'Hello!'
+    fn handle_asciiz(&mut self, i: &AssemblerInstruction) {
+        if self.phase != AssemblerPhase::First {
+            return;
+        }
+
+        if let Some(str) = i.get_string_constant() {
+            if let Some(label_name) = i.get_label_name() {
+                self.symbols.set_symbol_offset(&label_name, self.ro_offset);
+            };
+
+            for byte in str.as_bytes() {
+                self.ro.push(*byte);
+                self.ro_offset += 1;
+            }
+
+            self.ro.push(0);
+            self.ro_offset += 1;
         }
     }
 
@@ -98,6 +198,29 @@ impl Assembler {
             header.push(0 as u8);
         }
         header
+    }
+}
+
+#[derive(Debug, PartialEq, Clone)]
+pub enum AssemblerSection {
+    Data(Option<u32>),
+    Code(Option<u32>),
+    Unknown,
+}
+
+impl Default for AssemblerSection {
+    fn default() -> Self {
+        AssemblerSection::Unknown
+    }
+}
+
+impl<'a> From<&'a str> for AssemblerSection {
+    fn from(name: &str) -> AssemblerSection {
+        match name {
+            "data" => AssemblerSection::Data(None),
+            "code" => AssemblerSection::Code(None),
+            _ => AssemblerSection::Unknown,
+        }
     }
 }
 

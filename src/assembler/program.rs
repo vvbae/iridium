@@ -48,4 +48,11 @@ mod tests {
         let bytecode = program.to_bytes(&SymbolTable::new());
         assert_eq!(bytecode.len(), 4);
     }
+
+    #[test]
+    fn test_complete_program() {
+        let (_, p) = Program::parse(".data\nhello: .asciiz 'Hello everyone!'\n.code\nhlt").unwrap();
+
+        assert_eq!(4, p.instructions.len());
+    }
 }
