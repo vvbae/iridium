@@ -1,29 +1,18 @@
-use std::{fs::File, io::Read, path::Path};
+use std::{
+    fs::File,
+    io::{self, Read},
+    path::Path,
+};
 
 use clap::{arg, Command};
-use iridium::{assembler, repl, vm::VM};
+use iridium::{assembler, error::AssemblerError, repl, vm::VM};
 
 /// Attempts to read a file and return the contents. Exits if unable to read the file for any reason.
-fn read_file(tmp: &str) -> String {
-    let filename = Path::new(tmp);
-    match File::open(Path::new(&filename)) {
-        Ok(mut fh) => {
-            let mut contents = String::new();
-            match fh.read_to_string(&mut contents) {
-                Ok(_) => {
-                    return contents;
-                }
-                Err(e) => {
-                    println!("There was an error reading file: {:?}", e);
-                    std::process::exit(1);
-                }
-            }
-        }
-        Err(e) => {
-            println!("File not found: {:?}", e);
-            std::process::exit(1)
-        }
-    }
+fn read_file(tmp: &str) -> Result<String, io::Error> {
+    let mut contents = String::new();
+    let mut f = File::open(Path::new(tmp))?;
+    f.read_to_string(&mut contents)?;
+    Ok(contents)
 }
 
 /// Starts a REPL that will run until the user kills it
@@ -32,7 +21,7 @@ fn start_repl() {
     repl.run();
 }
 
-fn main() {
+fn main() -> Result<(), Vec<AssemblerError>> {
     let matches = Command::new("iridium")
         .version("1.0")
         .author("Vivi W. <polarsatellitest@gmail.com>")
@@ -43,19 +32,16 @@ fn main() {
     match matches.args_present() {
         true => {
             let filename = matches.get_one::<String>("INPUT_FILE").unwrap();
-            let program = read_file(filename);
+            let program = read_file(filename).unwrap();
             let mut asm = assembler::Assembler::new();
             let mut vm = VM::new();
-            let program = asm.assemble(&program);
-            match program {
-                Some(p) => {
-                    vm.add_bytes(p);
-                    vm.run();
-                    std::process::exit(0);
-                }
-                None => {}
-            }
+            let program = asm.assemble(&program)?;
+            vm.add_bytes(program);
+            vm.run();
+            std::process::exit(0);
         }
         false => start_repl(),
     }
+
+    Ok(())
 }

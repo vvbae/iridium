@@ -1,3 +1,5 @@
+use std::io::Read;
+
 use crate::{assembler::PIE_HEADER_PREFIX, instruction::Opcode};
 
 /// Read 32-bit data (instruction), execute, repeat
@@ -9,6 +11,7 @@ pub struct VM {
     remainder: u32,           // Contains the remainder of modulo division ops
     equal_flag: bool,         // Contains the result of the last comparison operation
     heap: Vec<u8>,            // Memory heap
+    ro_data: Vec<u8>,         // read-only section data
 }
 
 impl VM {
@@ -20,6 +23,7 @@ impl VM {
             remainder: 0,
             equal_flag: false,
             heap: Vec::new(),
+            ro_data: Vec::new(),
         }
     }
 
@@ -163,6 +167,23 @@ impl VM {
                     // TODO: Fix the bits
                 }
             }
+            // PRTS @symbol_name/$0
+            Opcode::PRTS => {
+                let starting_offset = self.next_16_bits() as usize;
+                let ending_offset = self.ro_data[starting_offset..]
+                    .iter()
+                    .position(|&x| x != 0)
+                    .unwrap();
+                let result = std::str::from_utf8(&self.ro_data[starting_offset..ending_offset]);
+                match result {
+                    Ok(s) => {
+                        print!("{}", s);
+                    }
+                    Err(e) => {
+                        println!("Error decoding string for prts instruction: {:#?}", e)
+                    }
+                };
+            }
             Opcode::NOP => {
                 self.next_8_bits();
                 self.next_8_bits();
@@ -246,6 +267,14 @@ mod tests {
         test_vm.program = prepend_header(test_vm.program);
         test_vm.run();
         assert_eq!(test_vm.registers[2], 50);
+    }
+
+    #[test]
+    fn test_prts_opcode() {
+        let mut test_vm = VM::get_test_vm();
+        test_vm.ro_data.append(&mut vec![72, 101, 108, 108, 111, 0]);
+        test_vm.program = vec![21, 0, 0, 0];
+        test_vm.run_once();
     }
 
     #[test]
