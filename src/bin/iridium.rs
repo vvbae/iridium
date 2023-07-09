@@ -38,7 +38,12 @@ fn main() -> Result<(), Vec<AssemblerError>> {
                     let mut vm = VM::new();
                     let program = asm.assemble(&program)?;
                     vm.add_bytes(program);
-                    vm.run();
+                    let events = vm.run();
+                    println!("VM Events");
+                    println!("--------------------------");
+                    for event in &events {
+                        println!("{:#?}", event);
+                    }
                     std::process::exit(0);
                 }
                 Err(e) => {
