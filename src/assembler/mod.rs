@@ -52,6 +52,7 @@ impl Assembler {
     }
 
     /// Convert a raw string to bytecode
+    /// i.e. LOAD $0 $1
     pub fn assemble(&mut self, raw: &str) -> Result<Vec<u8>, Vec<AssemblerError>> {
         match Program::parse(raw) {
             Ok((remainder, program)) => {
@@ -157,13 +158,13 @@ impl Assembler {
     /// Handles a declaration of a section header, such as:
     /// .code
     fn process_section_header(&mut self, header_name: &str) {
-        if let section = AssemblerSection::from(header_name) {
-            if section == AssemblerSection::Unknown {
-                return;
-            }
-            self.sections.push(section.clone());
-            self.curr_section = Some(section);
+        let section = AssemblerSection::from(header_name);
+        if section == AssemblerSection::Unknown {
+            println!("Unknow section header encountered: {}", header_name);
+            return;
         }
+        self.sections.push(section.clone());
+        self.curr_section = Some(section);
     }
 
     /// Handles a declaration of a null-terminated string:

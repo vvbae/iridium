@@ -22,7 +22,7 @@ impl Symbol {
 
 #[derive(Debug, Default)]
 pub struct SymbolTable {
-    symbols: Vec<Symbol>,
+    pub symbols: Vec<Symbol>,
 }
 
 impl SymbolTable {

@@ -1,4 +1,24 @@
-use crate::{assembler::PIE_HEADER_PREFIX, instruction::Opcode};
+use chrono::{DateTime, Utc};
+use uuid::Uuid;
+
+use crate::{
+    assembler::{PIE_HEADER_LENGTH, PIE_HEADER_PREFIX},
+    instruction::Opcode,
+};
+
+#[derive(Clone, Debug)]
+pub enum VMEventType {
+    Start,
+    Stop,
+    Crash,
+}
+
+#[derive(Clone, Debug)]
+pub struct VMEvent {
+    event: VMEventType,
+    at: DateTime<Utc>,
+    app_id: Uuid,
+}
 
 /// Read 32-bit data (instruction), execute, repeat
 #[derive(Default, Clone)]
@@ -10,6 +30,8 @@ pub struct VM {
     equal_flag: bool,         // Contains the result of the last comparison operation
     heap: Vec<u8>,            // Memory heap
     ro_data: Vec<u8>,         // read-only section data
+    id: Uuid,                 // UUID
+    events: Vec<VMEvent>,     // events
 }
 
 impl VM {
@@ -22,25 +44,41 @@ impl VM {
             equal_flag: false,
             heap: Vec::new(),
             ro_data: Vec::new(),
+            id: Uuid::new_v4(),
+            events: Vec::new(),
         }
     }
 
     /// Wraps execution in a loop so it will continue to run until done or there is an error
     /// executing instructions.
-    pub fn run(&mut self) -> u32 {
+    pub fn run(&mut self) -> Vec<VMEvent> {
+        self.events.push(VMEvent {
+            event: VMEventType::Start,
+            at: Utc::now(),
+            app_id: self.id.to_owned(),
+        });
         // TODO: Should setup custom errors here
         if !self.verify_header() {
+            self.events.push(VMEvent {
+                event: VMEventType::Crash,
+                at: Utc::now(),
+                app_id: self.id.to_owned(),
+            });
             println!("Header was incorrect");
-            return 1;
+            return self.events.clone();
         }
 
-        // If the header is valid, we need to change the PC to be at bit 64.
         self.pc = 64;
-        let mut is_done = false;
-        while !is_done {
+        let mut is_done = None;
+        while is_done.is_none() {
             is_done = self.execute_instruction();
         }
-        0
+        self.events.push(VMEvent {
+            event: VMEventType::Stop,
+            at: Utc::now(),
+            app_id: self.id.to_owned(),
+        });
+        self.events.clone()
     }
 
     /// Executes one instruction. Meant to allow for more controlled execution of the VM
@@ -48,15 +86,15 @@ impl VM {
         self.execute_instruction();
     }
 
-    fn execute_instruction(&mut self) -> bool {
+    fn execute_instruction(&mut self) -> Option<u32> {
         if self.pc >= self.program.len() {
-            return true;
+            return Some(1);
         }
         match self.decode_opcode() {
             // halt
             Opcode::HLT => {
                 println!("HLT encountered");
-                return true;
+                return None;
             }
             // LOAD $1 #15
             Opcode::LOAD => {
@@ -200,10 +238,10 @@ impl VM {
 
             _ => {
                 println!("Unrecognized opcode found! Terminating!");
-                return true;
+                return Some(1);
             }
         }
-        false
+        None
     }
 
     /// Adds an arbitrary byte to the VM's program
@@ -248,14 +286,8 @@ impl VM {
     fn verify_header(&self) -> bool {
         self.program[0..4] == PIE_HEADER_PREFIX
     }
-}
 
-#[cfg(test)]
-mod tests {
-    use crate::assembler::PIE_HEADER_LENGTH;
-
-    use super::*;
-
+    /// Prepend header to the body
     fn prepend_header(mut b: Vec<u8>) -> Vec<u8> {
         let mut prepension = vec![];
         for byte in PIE_HEADER_PREFIX.into_iter() {
@@ -267,12 +299,17 @@ mod tests {
         prepension.append(&mut b);
         prepension
     }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
 
     #[test]
     fn test_mul_opcode() {
         let mut test_vm = VM::get_test_vm();
         test_vm.program = vec![3, 0, 1, 2];
-        test_vm.program = prepend_header(test_vm.program);
+        test_vm.program = VM::prepend_header(test_vm.program);
         test_vm.run();
         assert_eq!(test_vm.registers[2], 50);
     }
