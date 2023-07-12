@@ -39,10 +39,12 @@ impl AssemblerInstruction {
             }
         };
 
-        for operand in &[&self.operand1, &self.operand2, &self.operand3] {
-            if let Some(token) = operand {
-                AssemblerInstruction::extract_operand(token, &mut results, symbol_table)
-            }
+        for token in [&self.operand1, &self.operand2, &self.operand3]
+            .iter()
+            .copied()
+            .flatten()
+        {
+            AssemblerInstruction::extract_operand(token, &mut results, symbol_table)
         }
 
         while results.len() < 4 {
@@ -86,9 +88,14 @@ impl AssemblerInstruction {
         self.operand1.is_some() || self.operand2.is_some() || self.operand3.is_some()
     }
 
-    /// If this instruction contains a label
-    pub fn is_label(&self) -> bool {
-        self.label.is_some()
+    /// If this instruction contains a label declaration
+    pub fn is_label_declaration(&self) -> bool {
+        matches!(&self.label, Some(Token::LabelDeclaration { name: _ }))
+    }
+
+    /// If this instruction contains a label usage
+    pub fn is_label_usage(&self) -> bool {
+        matches!(&self.label, Some(Token::LabelUsage { name: _ }))
     }
 
     /// If this instruction contains a directive
@@ -101,19 +108,28 @@ impl AssemblerInstruction {
         self.opcode.is_some()
     }
 
-    /// If contained label, return label; Else None
-    pub fn get_label_name(&self) -> Option<String> {
-        assert_eq!(self.label.is_some(), true);
-        self.label.as_ref().map_or(None, |tok| match tok {
+    /// If contained label declaration, return label; Else None
+    pub fn get_label_declaration_name(&self) -> Option<String> {
+        assert!(self.label.is_some());
+        self.label.as_ref().and_then(|tok| match tok {
             Token::LabelDeclaration { name } => Some(name.to_owned()),
+            _ => None,
+        })
+    }
+
+    /// If contained label usage, return label; Else None
+    pub fn get_label_usage_name(&self) -> Option<String> {
+        assert!(self.label.is_some());
+        self.label.as_ref().and_then(|tok| match tok {
+            Token::LabelUsage { name } => Some(name.to_owned()),
             _ => None,
         })
     }
 
     /// If contained directive, return name; Else None
     pub fn get_directive_name(&self) -> Option<String> {
-        assert_eq!(self.directive.is_some(), true);
-        self.directive.as_ref().map_or(None, |tok| match tok {
+        assert!(self.directive.is_some());
+        self.directive.as_ref().and_then(|tok| match tok {
             Token::Directive { name } => Some(name.to_owned()),
             _ => None,
         })
@@ -121,8 +137,8 @@ impl AssemblerInstruction {
 
     /// If contained string constant, return string; Else None
     pub fn get_string_constant(&self) -> Option<String> {
-        assert_eq!(self.operand1.is_some(), true);
-        self.operand1.as_ref().map_or(None, |tok| match tok {
+        assert!(self.operand1.is_some());
+        self.operand1.as_ref().and_then(|tok| match tok {
             Token::StringOperand { value } => Some(value.to_owned()),
             _ => None,
         })

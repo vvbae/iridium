@@ -1,6 +1,9 @@
 use std::vec;
 
-use crate::{error::AssemblerError, parse::Parse};
+use crate::{
+    error::{AssemblerError, IridiumError, Result},
+    parse::Parse,
+};
 
 use self::{
     assem_instruction::AssemblerInstruction,
@@ -11,18 +14,16 @@ use self::{
 pub const PIE_HEADER_PREFIX: [u8; 4] = [45, 50, 49, 45];
 pub const PIE_HEADER_LENGTH: usize = 64;
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Clone, Default)]
 pub enum AssemblerPhase {
+    #[default]
     First,
     Second,
 }
 
-impl Default for AssemblerPhase {
-    fn default() -> Self {
-        AssemblerPhase::First
-    }
-}
-
+/// <header> -> header prefix + read-only section len + padding: 64 bytes
+/// <read-only data> -> store constants
+/// <executable data>
 #[derive(Debug, Default)]
 pub struct Assembler {
     pub phase: AssemblerPhase,       // Tracks which phase the assember is in
@@ -53,30 +54,31 @@ impl Assembler {
 
     /// Convert a raw string to bytecode
     /// i.e. LOAD $0 $1
-    pub fn assemble(&mut self, raw: &str) -> Result<Vec<u8>, Vec<AssemblerError>> {
+    pub fn assemble(&mut self, raw: &str) -> Result<Vec<u8>> {
         match Program::parse(raw) {
             Ok((remainder, program)) => {
                 assert_eq!(remainder, "");
-                let mut assembled_program = self.write_pie_header();
+
                 self.process_first_phase(&program);
 
                 if !self.errors.is_empty() {
-                    return Err(self.errors.clone());
+                    return Err(IridiumError::Assemble(self.errors.clone()));
                 }
 
                 if self.sections.len() != 2 {
                     self.errors.push(AssemblerError::InsufficientSections);
-                    return Err(self.errors.clone());
+                    return Err(IridiumError::Assemble(self.errors.clone()));
                 }
 
                 let mut body = self.process_second_phase(&program);
+                let mut assembled_program = self.write_pie_header();
 
                 assembled_program.append(&mut body);
                 Ok(assembled_program)
             }
             Err(e) => {
                 eprintln!("There was an error parsing the code: {:?}", e);
-                Err(vec![AssemblerError::ParsingError])
+                Err(IridiumError::Assemble(vec![AssemblerError::ParsingError]))
             }
         }
     }
@@ -84,18 +86,18 @@ impl Assembler {
     /// Extract program labels
     fn process_first_phase(&mut self, p: &Program) {
         for i in &p.instructions {
-            if i.is_label() {
-                if self.curr_section.is_some() {
-                    self.process_label_declaration(&i);
-                } else {
-                    self.errors.push(AssemblerError::NoSegmentDeclarationFound(
-                        self.curr_instruction,
-                    ));
-                }
-            }
-
             if i.is_directive() {
                 self.process_directive(i);
+            }
+
+            match self.curr_section {
+                None => self.errors.push(AssemblerError::NoSegmentDeclarationFound(
+                    self.curr_instruction,
+                )),
+                Some(_) => match i.is_label_declaration() {
+                    true => self.process_label_declaration(i),
+                    false => {} // process label usage
+                },
             }
             self.curr_instruction += 1;
         }
@@ -145,7 +147,7 @@ impl Assembler {
     /// Handles the declaration of a label such as:
     /// hello: .asciiz 'Hello'
     fn process_label_declaration(&mut self, i: &AssemblerInstruction) {
-        let label_name = i.get_label_name().unwrap();
+        let label_name = i.get_label_declaration_name().unwrap();
         if self.symbols.contain_symbol(&label_name) {
             self.errors.push(AssemblerError::SymbolAlreadyDeclared);
             return;
@@ -165,6 +167,8 @@ impl Assembler {
         }
         self.sections.push(section.clone());
         self.curr_section = Some(section);
+        assert_ne!(self.sections.len(), 0);
+        assert_ne!(self.curr_section, None);
     }
 
     /// Handles a declaration of a null-terminated string:
@@ -175,7 +179,7 @@ impl Assembler {
         }
 
         if let Some(str) = i.get_string_constant() {
-            if let Some(label_name) = i.get_label_name() {
+            if let Some(label_name) = i.get_label_declaration_name() {
                 self.symbols.set_symbol_offset(&label_name, self.ro_offset);
             };
 
@@ -184,35 +188,31 @@ impl Assembler {
                 self.ro_offset += 1;
             }
 
+            // null-terminated string
             self.ro.push(0);
             self.ro_offset += 1;
         }
     }
 
-    /// Write header: 4 bytes and 60 0s
+    /// PIE_HEADER_PREFIX(4 bytes) + Read-Only(4 bytes) + padding
     fn write_pie_header(&self) -> Vec<u8> {
-        let mut header = vec![];
-        for byte in PIE_HEADER_PREFIX.into_iter() {
-            header.push(byte.clone());
-        }
-        while header.len() < PIE_HEADER_LENGTH {
-            header.push(0 as u8);
-        }
+        let mut header = vec![0; PIE_HEADER_LENGTH];
+        header[..PIE_HEADER_PREFIX.len()].clone_from_slice(&PIE_HEADER_PREFIX);
+
+        let ro_len: Vec<u8> = (self.ro.len() as u32).to_le_bytes().to_vec();
+        header[PIE_HEADER_PREFIX.len()..PIE_HEADER_PREFIX.len() + ro_len.len()]
+            .clone_from_slice(&ro_len);
+
         header
     }
 }
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Clone, Default)]
 pub enum AssemblerSection {
     Data(Option<u32>),
     Code(Option<u32>),
+    #[default]
     Unknown,
-}
-
-impl Default for AssemblerSection {
-    fn default() -> Self {
-        AssemblerSection::Unknown
-    }
 }
 
 impl<'a> From<&'a str> for AssemblerSection {
@@ -241,6 +241,14 @@ mod tests {
         assert_eq!(program.len(), 92);
         vm.add_bytes(program);
         assert_eq!(vm.program.len(), 92);
+    }
+
+    #[test]
+    fn test_code_start_offset_written() {
+        let mut asm = Assembler::new();
+        let test_string = ".data\ntest1: .asciiz 'Hello'\n.code\nload $0 #100\nload $1 #1\nload $2 #0\ntest: inc $0\nneq $0 $2\njmpe @test\nhlt";
+        let program = asm.assemble(test_string).unwrap();
+        assert_eq!(program[4], 6);
     }
 }
 

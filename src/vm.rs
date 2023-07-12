@@ -1,3 +1,6 @@
+use std::io::Cursor;
+
+use byteorder::{LittleEndian, ReadBytesExt};
 use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
@@ -32,6 +35,7 @@ pub struct VM {
     ro_data: Vec<u8>,         // read-only section data
     id: Uuid,                 // UUID
     events: Vec<VMEvent>,     // events
+    pub logical_cores: usize, // number of CPUs
 }
 
 impl VM {
@@ -46,6 +50,7 @@ impl VM {
             ro_data: Vec::new(),
             id: Uuid::new_v4(),
             events: Vec::new(),
+            logical_cores: num_cpus::get(),
         }
     }
 
@@ -68,7 +73,7 @@ impl VM {
             return self.events.clone();
         }
 
-        self.pc = 64;
+        self.pc = 64 + self.get_starting_offset();
         let mut is_done = None;
         while is_done.is_none() {
             is_done = self.execute_instruction();
@@ -244,6 +249,12 @@ impl VM {
         None
     }
 
+    /// Get starting offset of the section after read-only
+    fn get_starting_offset(&self) -> usize {
+        let mut rdr = Cursor::new(&self.program[4..8]);
+        rdr.read_u32::<LittleEndian>().unwrap() as usize
+    }
+
     /// Adds an arbitrary byte to the VM's program
     pub fn add_byte(&mut self, b: u8) {
         self.program.push(b);
@@ -291,7 +302,7 @@ impl VM {
     fn prepend_header(mut b: Vec<u8>) -> Vec<u8> {
         let mut prepension = vec![];
         for byte in PIE_HEADER_PREFIX.into_iter() {
-            prepension.push(byte.clone());
+            prepension.push(byte);
         }
         while prepension.len() < PIE_HEADER_LENGTH {
             prepension.push(0);

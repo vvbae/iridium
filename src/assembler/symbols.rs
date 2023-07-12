@@ -39,7 +39,7 @@ impl SymbolTable {
 
     /// If contain symbol
     pub fn contain_symbol(&self, name: &str) -> bool {
-        self.symbols.iter().find(|s| s.name == name).is_some()
+        self.symbols.iter().any(|s| s.name == name)
     }
 
     /// Get symbol offset by name
@@ -47,7 +47,7 @@ impl SymbolTable {
         self.symbols
             .iter()
             .find(|s| s.name == name)
-            .map_or(None, |s| s.offset)
+            .and_then(|s| s.offset)
     }
 
     /// Set symbol offset
