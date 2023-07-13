@@ -4,7 +4,7 @@ use log::error;
 
 use super::{cluster_client::ClusterClient, NodeAlias};
 
-#[derive(Default, Debug)]
+#[derive(Default)]
 pub struct Manager {
     clients: HashMap<String, ClusterClient>,
 }

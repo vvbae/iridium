@@ -235,13 +235,16 @@ impl REPL {
 
         let ip = args[0];
         let port = args[1];
+
         let addr = ip.to_owned() + ":" + port;
         let alias = self.vm.alias.as_ref().unwrap();
+        let _addr = addr.clone();
 
         if let Ok(stream) = TcpStream::connect(addr) {
             self.send_message("Connected to cluster!".to_string())?;
-            // Adds the remote cluster to our list of connected clusters
-            let cc = ClusterClient::new(stream, alias.to_string())?;
+            let mut cc = ClusterClient::new(stream)?.with_alias(alias.to_string());
+            cc.send_hello()?;
+            self.send_message(format!("Node {} sent hello to server at {}", alias, _addr))?;
             if let Ok(mut lock) = self.vm.conn_manager.write() {
                 lock.add_client(alias.to_string(), cc);
             }

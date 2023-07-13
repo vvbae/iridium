@@ -12,3 +12,9 @@ pub enum IridiumMessage {
         nodes: Vec<(NodeAlias, String, String)>, // list of nodes (alias, IP, port)
     },
 }
+
+#[derive(Debug, Serialize, Deserialize)]
+pub enum HelloResponse {
+    Ok(String),
+    Err(String),
+}

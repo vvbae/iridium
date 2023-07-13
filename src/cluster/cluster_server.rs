@@ -1,35 +1,78 @@
-use log::{error, info};
-use std::net::{TcpListener, ToSocketAddrs};
+use log::{debug, error, info};
+use serde_json::Deserializer;
+use std::io::{BufReader, BufWriter, Write};
+use std::net::{TcpListener, TcpStream, ToSocketAddrs};
 use std::sync::{Arc, RwLock};
 use std::thread;
 
+use crate::cluster::message::{HelloResponse, IridiumMessage};
 use crate::error::Result;
 
-use super::cluster_client::ClusterClient;
 use super::manager::Manager;
 
-/// Run the server listening on the given address
-pub fn listen<A: ToSocketAddrs>(
-    alias: String,
-    addr: A,
+pub struct ClusterServer {
     conn_manager: Arc<RwLock<Manager>>,
-) -> Result<()> {
-    info!("Initializing Cluster server...");
-    let listener = TcpListener::bind(addr)?;
-    for stream in listener.incoming() {
-        info!("New Node connected!");
-        let _alias = alias.clone();
-        match stream {
-            Ok(stream) => {
-                thread::spawn(move || -> Result<()> {
-                    let mut client = ClusterClient::new(stream, _alias)?;
-                    client.run()?;
+    alias: String,
+}
 
-                    Ok(())
-                });
-            }
-            Err(e) => error!("Connection failed: {}", e),
+impl ClusterServer {
+    pub fn new(
+        alias: String, // server alias
+        conn_manager: Arc<RwLock<Manager>>,
+    ) -> Self {
+        Self {
+            conn_manager,
+            alias,
         }
     }
-    Ok(())
+
+    /// Run the server listening on the given address
+    pub fn listen<A: ToSocketAddrs>(&mut self, addr: A) -> Result<()> {
+        info!("Initializing Cluster server...");
+        let listener = TcpListener::bind(addr)?;
+
+        for stream in listener.incoming() {
+            info!("New Node connected!");
+            match stream {
+                Ok(stream) => {
+                    thread::spawn(move || -> Result<()> {
+                        Self::serve(stream)?;
+                        Ok(())
+                    });
+                }
+                Err(e) => error!("Connection failed: {}", e),
+            }
+        }
+        Ok(())
+    }
+
+    /// Read messages and write response to the stream
+    pub fn serve(tcp: TcpStream) -> Result<()> {
+        let peer_addr = tcp.peer_addr()?;
+        let reader = BufReader::new(&tcp);
+        let mut writer = BufWriter::new(&tcp);
+        let req_reader = Deserializer::from_reader(reader).into_iter::<IridiumMessage>();
+
+        macro_rules! send_resp {
+            ($resp:expr) => {{
+                let resp = $resp;
+                serde_json::to_writer(&mut writer, &resp)?;
+                writer.flush()?;
+                debug!("Response sent to {}: {:?}", peer_addr, resp);
+            }};
+        }
+
+        for req in req_reader {
+            let req = req?;
+            info!("Receive request from {}: {:?}", peer_addr, req);
+            match req {
+                IridiumMessage::Hello { alias } => send_resp!(HelloResponse::Ok(format!(
+                    "Received hello from node {}",
+                    alias
+                ))),
+                IridiumMessage::HelloAck { alias: _, nodes: _ } => todo!(),
+            }
+        }
+        Ok(())
+    }
 }

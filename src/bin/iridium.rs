@@ -32,6 +32,9 @@ fn start_remote_server(addr: SocketAddr) {
 }
 
 fn main() -> Result<()> {
+    env_logger::builder()
+        .filter_level(log::LevelFilter::Info)
+        .init();
     let default_client_addr = DEFAULT_CLIENT_LISTENING_ADDRESS
         .parse::<SocketAddr>()
         .unwrap();

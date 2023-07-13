@@ -12,14 +12,14 @@ use uuid::Uuid;
 
 use crate::{
     assembler::{PIE_HEADER_LENGTH, PIE_HEADER_PREFIX},
-    cluster::{cluster_server, manager::Manager},
+    cluster::{cluster_server::ClusterServer, manager::Manager},
     error::Result,
     instruction::Opcode,
 };
 
-const DEFAULT_PEER_LISTENING_HOST: &str = "127.0.0.1";
-const DEFAULT_PEER_LISTENING_PORT: &str = "2254";
-const DEFAULT_NODE_ALIAS: &str = "";
+// const DEFAULT_PEER_LISTENING_HOST: &str = "127.0.0.1";
+// const DEFAULT_PEER_LISTENING_PORT: &str = "2254";
+// const DEFAULT_NODE_ALIAS: &str = "";
 
 #[derive(Clone, Debug)]
 pub enum VMEventType {
@@ -390,22 +390,23 @@ impl VM {
         self
     }
 
-    /// Bind peer connections
+    /// Listen for peer connections
     pub fn bind_cluster_server(&mut self) {
         let host = self.peer_host.as_ref().unwrap();
         let port = self.peer_port.as_ref().unwrap();
         debug!(
-            "Building socket_addr from host: {} and port: {} and alias: {:?}",
-            host, port, self.alias
+            "Node {:?} is listening for incoming connections on {}:{}",
+            self.alias, host, port,
         );
         let socket_addr = (host.to_owned() + ":" + port)
             .parse::<SocketAddr>()
             .unwrap();
-        let clone = self.conn_manager.clone();
+        let conn_manager = self.conn_manager.clone();
         let alias = self.alias.clone().unwrap();
         debug!("Spawning listening thread");
         thread::spawn(move || -> Result<()> {
-            cluster_server::listen(alias, socket_addr, clone)?;
+            let mut server = ClusterServer::new(alias, conn_manager);
+            server.listen(socket_addr)?;
             Ok(())
         });
     }

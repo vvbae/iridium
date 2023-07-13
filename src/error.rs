@@ -38,6 +38,9 @@ pub enum IridiumError {
     /// Assemble error
     #[error("Assemble Error")]
     Assemble(Vec<AssemblerError>),
+    /// Error with a string message
+    #[error("{0}")]
+    StringError(String),
 }
 
 impl From<mpsc::SendError<String>> for IridiumError {
