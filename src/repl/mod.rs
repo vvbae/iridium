@@ -3,12 +3,16 @@ pub mod command_parser;
 use std::{
     fs::File,
     io::{self, Read, Write},
+    net::TcpStream,
     path::Path,
-    sync::mpsc::{self, Receiver, Sender},
+    sync::mpsc::{self, Receiver, SendError, Sender},
 };
+
+use log::debug;
 
 use crate::{
     assembler::{program::Program, symbols::Symbol, Assembler},
+    cluster::cluster_client::ClusterClient,
     error::{IridiumError, Result},
     parse::Parse,
     scheduler::Scheduler,
@@ -32,11 +36,11 @@ pub struct REPL {
 }
 
 impl REPL {
-    pub fn new() -> REPL {
+    pub fn new(vm: VM) -> REPL {
         let (tx, rx): (Sender<String>, Receiver<String>) = mpsc::channel();
         Self {
             command_buffer: Vec::<String>::new(),
-            vm: VM::new(),
+            vm,
             asm: Assembler::new(),
             scheduler: Scheduler::new(),
             tx_pipe: Some(Box::new(tx)),
@@ -97,6 +101,9 @@ impl REPL {
             "!symbols" => self.symbols(&args[1..])?,
             "!load_file" => self.load_file(&args[1..])?,
             "!spawn" => self.spawn(&args[1..])?,
+            "!start_cluster" => self.start_cluster(&args[1..])?,
+            "!join_cluster" => self.join_cluster(&args[1..])?,
+            "!cluster_members" => self.cluster_members(&args[1..])?,
             _ => {
                 self.send_message("Invalid command!".to_string())?;
             }
@@ -215,19 +222,68 @@ impl REPL {
         Ok(())
     }
 
+    fn start_cluster(&mut self, _args: &[&str]) -> Result<()> {
+        self.send_message("Started cluster server!".to_string())?;
+        self.vm.bind_cluster_server();
+
+        Ok(())
+    }
+
+    fn join_cluster(&mut self, args: &[&str]) -> Result<()> {
+        debug!("Joining cluster with VM ID: {:?}", self.vm.alias);
+        self.send_message("Attempting to join cluster...".to_string())?;
+
+        let ip = args[0];
+        let port = args[1];
+        let addr = ip.to_owned() + ":" + port;
+        let alias = self.vm.alias.as_ref().unwrap();
+
+        if let Ok(stream) = TcpStream::connect(addr) {
+            self.send_message("Connected to cluster!".to_string())?;
+            // Adds the remote cluster to our list of connected clusters
+            let cc = ClusterClient::new(stream, alias.to_string())?;
+            if let Ok(mut lock) = self.vm.conn_manager.write() {
+                lock.add_client(alias.to_string(), cc);
+            }
+        } else {
+            self.send_message("Could not connect to cluster!".to_string())?;
+        }
+
+        Ok(())
+    }
+
+    fn cluster_members(&mut self, args: &[&str]) -> Result<()> {
+        self.send_message(format!("Listing Known Nodes:"))?;
+        if let Ok(lock) = self.vm.conn_manager.read() {
+            let cluster_members = lock.get_client_names();
+            self.send_message(format!("{:#?}", cluster_members))?;
+        }
+
+        Ok(())
+    }
+
     pub fn send_message(&self, msg: String) -> Result<()> {
         match &self.tx_pipe {
             Some(pipe) => {
                 pipe.send(msg + "\n")?;
                 Ok(())
             }
-            None => Ok(()),
+            None => Err(IridiumError::Send(SendError(
+                "Send pipe not found on repl".to_owned(),
+            ))),
         }
     }
 
     pub fn send_prompt(&mut self) -> Result<()> {
-        self.send_message(PROMPT.to_owned())?;
-        Ok(())
+        match &self.tx_pipe {
+            Some(pipe) => {
+                pipe.send(PROMPT.to_owned())?;
+                Ok(())
+            }
+            None => Err(IridiumError::Send(SendError(
+                "Send pipe not found on repl".to_owned(),
+            ))),
+        }
     }
 
     fn get_data_from_load(&mut self) -> Option<String> {

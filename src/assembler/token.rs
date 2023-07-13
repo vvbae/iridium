@@ -1,8 +1,7 @@
 use nom::{
-    branch::alt,
-    bytes::complete::{tag, tag_no_case, take_until},
+    bytes::complete::{tag, take_until},
     character::complete::{alpha1, alphanumeric1, digit1},
-    combinator::map,
+    combinator::{map, opt},
     error::context,
     sequence::{preceded, terminated, tuple},
 };
@@ -14,6 +13,7 @@ pub enum Token {
     Op { code: Opcode },
     Register { reg_num: u8 },
     IntegerOperand { value: i32 },
+    FloatOperand { value: f64 },
     StringOperand { value: String },
     LabelDeclaration { name: String },
     LabelUsage { name: String },
@@ -69,31 +69,8 @@ pub fn parse_directive(input: &str) -> ParseResult<'_, Token> {
 }
 
 pub fn parse_opcode(input: &str) -> ParseResult<'_, Token> {
-    let (remaining, token) = context(
-        "Opcode",
-        map(
-            alt((
-                tag_no_case("load"),
-                tag_no_case("add"),
-                tag_no_case("sub"),
-                tag_no_case("mul"),
-                tag_no_case("div"),
-                tag_no_case("hlt"),
-                tag_no_case("jmpf"),
-                tag_no_case("jmpb"),
-                tag_no_case("jmpe"),
-                tag_no_case("jmp"),
-                tag_no_case("eq"),
-                tag_no_case("neq"),
-                tag_no_case("gt"),
-                tag_no_case("lt"),
-                tag_no_case("aloc"),
-                tag_no_case("inc"),
-                tag_no_case("dec"),
-            )),
-            |op: &str| op.to_lowercase(),
-        ),
-    )(input)?;
+    let (remaining, token) =
+        context("Opcode", map(alphanumeric1, |op: &str| op.to_lowercase()))(input)?;
 
     Ok((
         remaining,
@@ -123,6 +100,24 @@ pub fn parse_int_operand(input: &str) -> ParseResult<'_, Token> {
             value: token.parse::<i32>().unwrap(),
         },
     ))
+}
+
+pub fn parse_float_operand(input: &str) -> ParseResult<'_, Token> {
+    let (remaining, value) = context(
+        "Float Operand",
+        map(
+            tuple((opt(tag("-")), digit1, tag("."), digit1)),
+            |(sign, left, _, right)| {
+                let value = format!("{}.{}", left, right).parse::<f64>().unwrap();
+                match sign {
+                    Some(_) => -1.0 * value,
+                    None => value,
+                }
+            },
+        ),
+    )(input)?;
+
+    Ok((remaining, Token::FloatOperand { value }))
 }
 
 #[cfg(test)]

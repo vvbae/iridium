@@ -1,4 +1,6 @@
 pub mod assembler;
+pub mod cluster;
+pub mod common;
 pub mod error;
 pub mod instruction;
 pub mod parse;

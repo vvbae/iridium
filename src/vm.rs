@@ -1,13 +1,25 @@
-use std::io::Cursor;
-
 use byteorder::{LittleEndian, ReadBytesExt};
 use chrono::{DateTime, Utc};
+use log::debug;
+use std::{
+    f64::EPSILON,
+    io::Cursor,
+    net::SocketAddr,
+    sync::{Arc, RwLock},
+    thread,
+};
 use uuid::Uuid;
 
 use crate::{
     assembler::{PIE_HEADER_LENGTH, PIE_HEADER_PREFIX},
+    cluster::{cluster_server, manager::Manager},
+    error::Result,
     instruction::Opcode,
 };
+
+const DEFAULT_PEER_LISTENING_HOST: &str = "127.0.0.1";
+const DEFAULT_PEER_LISTENING_PORT: &str = "2254";
+const DEFAULT_NODE_ALIAS: &str = "";
 
 #[derive(Clone, Debug)]
 pub enum VMEventType {
@@ -27,6 +39,7 @@ pub struct VMEvent {
 #[derive(Default, Clone)]
 pub struct VM {
     pub registers: [i32; 32], // 32-bits is an instruction; first 8-bit->Opcode; remaining->Operands
+    pub float_registers: [f64; 32], // Array to store floating point
     pc: usize,                // program counter
     pub program: Vec<u8>,     // The bytecode of the program being run
     remainder: u32,           // Contains the remainder of modulo division ops
@@ -36,12 +49,17 @@ pub struct VM {
     id: Uuid,                 // UUID
     events: Vec<VMEvent>,     // events
     pub logical_cores: usize, // number of CPUs
+    pub alias: Option<String>, // An alias that can be specified by the user and used to refer to the Node
+    peer_host: Option<String>, // Server address that the VM will bind to for server-to-server communications
+    pub peer_port: Option<String>, // Port the server will bind to for server-to-server communications
+    pub conn_manager: Arc<RwLock<Manager>>, // Data structure to manage remote clients
 }
 
 impl VM {
     pub fn new() -> VM {
         Self {
             registers: [0; 32],
+            float_registers: [0.0; 32],
             pc: 65,
             program: Vec::new(),
             remainder: 0,
@@ -51,6 +69,10 @@ impl VM {
             id: Uuid::new_v4(),
             events: Vec::new(),
             logical_cores: num_cpus::get(),
+            alias: None,
+            peer_host: None,
+            peer_port: None,
+            conn_manager: Arc::new(RwLock::new(Manager::new())),
         }
     }
 
@@ -235,12 +257,92 @@ impl VM {
                     }
                 };
             }
+            // Begin floating point 64-bit instructions
+            Opcode::LOADF64 => {
+                let register = self.next_8_bits() as usize;
+                let number = f64::from(self.next_16_bits());
+                self.float_registers[register] = number;
+            }
+            Opcode::ADDF64 => {
+                let register1 = self.float_registers[self.next_8_bits() as usize];
+                let register2 = self.float_registers[self.next_8_bits() as usize];
+                self.float_registers[self.next_8_bits() as usize] = register1 + register2;
+            }
+            Opcode::SUBF64 => {
+                let register1 = self.float_registers[self.next_8_bits() as usize];
+                let register2 = self.float_registers[self.next_8_bits() as usize];
+                self.float_registers[self.next_8_bits() as usize] = register1 - register2;
+            }
+            Opcode::MULF64 => {
+                let register1 = self.float_registers[self.next_8_bits() as usize];
+                let register2 = self.float_registers[self.next_8_bits() as usize];
+                self.float_registers[self.next_8_bits() as usize] = register1 * register2;
+            }
+            Opcode::DIVF64 => {
+                let register1 = self.float_registers[self.next_8_bits() as usize];
+                let register2 = self.float_registers[self.next_8_bits() as usize];
+                self.float_registers[self.next_8_bits() as usize] = register1 / register2;
+            }
+            Opcode::EQF64 => {
+                let register1 = self.float_registers[self.next_8_bits() as usize];
+                let register2 = self.float_registers[self.next_8_bits() as usize];
+                self.equal_flag = (register1 - register2).abs() < EPSILON;
+                self.next_8_bits();
+            }
+            Opcode::NEQF64 => {
+                let register1 = self.float_registers[self.next_8_bits() as usize];
+                let register2 = self.float_registers[self.next_8_bits() as usize];
+                self.equal_flag = (register1 - register2).abs() > EPSILON;
+                self.next_8_bits();
+            }
+            Opcode::GTF64 => {
+                let register1 = self.float_registers[self.next_8_bits() as usize];
+                let register2 = self.float_registers[self.next_8_bits() as usize];
+                self.equal_flag = register1 > register2;
+                self.next_8_bits();
+            }
+            Opcode::GTEF64 => {
+                let register1 = self.float_registers[self.next_8_bits() as usize];
+                let register2 = self.float_registers[self.next_8_bits() as usize];
+                self.equal_flag = register1 >= register2;
+                self.next_8_bits();
+            }
+            Opcode::LTF64 => {
+                let register1 = self.float_registers[self.next_8_bits() as usize];
+                let register2 = self.float_registers[self.next_8_bits() as usize];
+                self.equal_flag = register1 < register2;
+                self.next_8_bits();
+            }
+            Opcode::LTEF64 => {
+                let register1 = self.float_registers[self.next_8_bits() as usize];
+                let register2 = self.float_registers[self.next_8_bits() as usize];
+                self.equal_flag = register1 <= register2;
+                self.next_8_bits();
+            }
             Opcode::NOP => {
                 self.next_8_bits();
                 self.next_8_bits();
                 self.next_8_bits();
             }
-
+            Opcode::SHL => {
+                let reg_num = self.next_8_bits() as usize;
+                let num_bits = match self.next_8_bits() {
+                    0 => 16,
+                    other => other,
+                };
+                self.registers[reg_num] = self.registers[reg_num].wrapping_shl(num_bits.into());
+                self.next_8_bits();
+            }
+            // SHR $<reg_num> #<number of bits> shifts to the right by default 16 bits
+            Opcode::SHR => {
+                let reg_num = self.next_8_bits() as usize;
+                let num_bits = match self.next_8_bits() {
+                    0 => 16,
+                    other => other,
+                };
+                self.registers[reg_num] = self.registers[reg_num].wrapping_shr(num_bits.into());
+                self.next_8_bits();
+            }
             _ => {
                 println!("Unrecognized opcode found! Terminating!");
                 return Some(1);
@@ -270,6 +372,42 @@ impl VM {
         test_vm.registers[0] = 5;
         test_vm.registers[1] = 10;
         test_vm
+    }
+
+    /// Add alias to this VM
+    pub fn with_alias(mut self, alias: &String) -> Self {
+        self.alias = match alias.as_ref() {
+            "" => None,
+            other => Some(other.to_owned()),
+        };
+        self
+    }
+
+    /// Add cluster binding to this VM
+    pub fn with_cluster_bind(mut self, peer_host: &String, peer_port: &String) -> Self {
+        self.peer_host = Some(peer_host.to_string());
+        self.peer_port = Some(peer_port.to_string());
+        self
+    }
+
+    /// Bind peer connections
+    pub fn bind_cluster_server(&mut self) {
+        let host = self.peer_host.as_ref().unwrap();
+        let port = self.peer_port.as_ref().unwrap();
+        debug!(
+            "Building socket_addr from host: {} and port: {} and alias: {:?}",
+            host, port, self.alias
+        );
+        let socket_addr = (host.to_owned() + ":" + port)
+            .parse::<SocketAddr>()
+            .unwrap();
+        let clone = self.conn_manager.clone();
+        let alias = self.alias.clone().unwrap();
+        debug!("Spawning listening thread");
+        thread::spawn(move || -> Result<()> {
+            cluster_server::listen(alias, socket_addr, clone)?;
+            Ok(())
+        });
     }
 
     /// Decode current opcode and increment program counter
